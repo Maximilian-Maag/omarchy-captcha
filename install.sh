@@ -44,19 +44,25 @@ PY
 printf '  wrote %s\n' "$FRAGMENT"
 
 CONFIG_PY="$QUTE_CONFIG_DIR/config.py"
+# qutebrowser sources exactly one config.py, so a fragment needs one source line for the
+# bindings to exist. Follow a symlinked config.py (omarchy-qutebrowser owns it that way) to
+# the file that actually defines the config and add the marked line there, so the plugin
+# wires itself with no manual step. Idempotent.
+TARGET_PY="$CONFIG_PY"
 if [[ -L $CONFIG_PY ]]; then
-  printf '\nNOTE: %s is a symlink (another plugin owns it), so this installer did not\n' "$CONFIG_PY"
-  printf 'touch it. Add this one line there, then run :config-source in qutebrowser:\n'
-  printf '    config.source("captcha-bindings.py")\n'
-elif [[ -f $CONFIG_PY ]]; then
-  if grep -q 'captcha-bindings.py' "$CONFIG_PY"; then
+  TARGET_PY="$(readlink -f "$CONFIG_PY")"
+  printf '  config.py is a symlink -> %s\n' "$TARGET_PY"
+fi
+if [[ -f $TARGET_PY ]]; then
+  if grep -q 'captcha-bindings.py' "$TARGET_PY"; then
     printf '  config.py already sources the fragment\n'
   else
-    printf '\nconfig.source("captcha-bindings.py")\n' >> "$CONFIG_PY"
-    printf '  added the source line to %s\n' "$CONFIG_PY"
+    printf '\nconfig.source("captcha-bindings.py")\n' >> "$TARGET_PY"
+    printf '  added the source line to %s\n' "$TARGET_PY"
   fi
 else
-  printf '\nNOTE: no %s found. Add: config.source("captcha-bindings.py")\n' "$CONFIG_PY"
+  printf '\nNOTE: no %s found. Add this line where your config is loaded:\n' "$CONFIG_PY"
+  printf '    config.source("captcha-bindings.py")\n'
 fi
 
 printf '\nDone. Bindings: ,cc solve  ,ca audio  ,cs status\n'
