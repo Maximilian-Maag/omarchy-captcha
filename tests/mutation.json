@@ -1,0 +1,74 @@
+{
+  "_about": [
+    "Mutation-test targets for this plugin. Each target names the file to mutate and",
+    "the test command that must notice a change (the fast suite that covers it).",
+    "Run with tools/mutator.py, or as part of tools/run_tests.sh.",
+    "min_kill_rate is the floor: below it the run fails, and a target that yields no",
+    "mutants at all fails too, so a mutation pass can never be green over nothing.",
+    "per_operator caps how many occurrences of each operator are mutated (determinism",
+    "and runtime); raise it for a deeper nightly run via --max-rate/--only.",
+    "exempt lists shipped sources that are deliberately not mutated, each with a reason;",
+    "policy_check's tests/no-gaps rule requires every source_globs match to be accounted",
+    "for here or be a target.",
+    "equivalent lists mutants that are genuinely UNOBSERVABLE, each with the mechanism.",
+    "Every entry was proven by measurement, not asserted: the mutant was applied to a",
+    "temp copy and the target's FULL test output diffed against the baseline (identical",
+    "once unittest's elapsed-time line is normalised). An unproven entry here would be",
+    "exactly the accounting trick mutation testing exists to prevent."
+  ],
+  "min_kill_rate": 0.85,
+  "timeout": 120,
+  "per_operator": 2,
+  "targets": [
+    {
+      "path": "bin/omarchy-captcha-solve",
+      "lang": "shell",
+      "tests": ["bash", "tests/shell/test_solve.sh"],
+      "equivalent": [
+        {
+          "line": 22,
+          "kind": "number\u00b11",
+          "reason": "the digit in the fd redirection 2>&1 (have() discards stderr); 3>&1 opens an unused descriptor and changes nothing. Proven: mutant applied, full shell-test output byte-identical to the baseline."
+        }
+      ]
+    },
+    {
+      "path": "bin/omarchy-captcha-transcribe",
+      "lang": "shell",
+      "tests": ["bash", "tests/shell/test_transcribe.sh"],
+      "equivalent": [
+        {
+          "line": 28,
+          "kind": "number\u00b11",
+          "reason": "the digit in the fd redirection 2>&1 (have() discards stderr); 3>&1 opens an unused descriptor and changes nothing. Proven: mutant applied, full shell-test output byte-identical to the baseline."
+        }
+      ]
+    },
+    {
+      "path": "userscripts/qute-captcha",
+      "lang": "python",
+      "tests": ["python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_unit_*.py", "-q"],
+      "equivalent": [
+        {
+          "line": 106,
+          "kind": "number\u00b11",
+          "reason": "the subprocess timeout of 90s in _run; every helper the tests invoke is a stub that returns immediately, so 91 vs 90 is unobservable. Proven: mutant applied, unit-test output identical to the baseline (after normalising unittest's elapsed-time line)."
+        }
+      ]
+    }
+  ],
+  "exempt": [
+    {
+      "path": "install.sh",
+      "reason": "privileged installer (sudo, /usr/local/bin, symlinks into the qutebrowser profile); mutating it meaningfully needs a root harness, the wiring is verified by review"
+    },
+    {
+      "path": "tools/policy_check.py",
+      "reason": "vendored checker, byte-identical to omarchy-qutebrowser's; covered by that repo's mutation suite"
+    },
+    {
+      "path": "tools/mutator.py",
+      "reason": "vendored mutation runner, byte-identical to omarchy-qutebrowser's; covered by that repo's mutation suite"
+    }
+  ]
+}

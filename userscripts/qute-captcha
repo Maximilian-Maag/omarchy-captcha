@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""qute-captcha - solve a captcha on the current page using LOCAL tools only.
+
+Finds a captcha image on the page, reads it with omarchy-captcha-solve (tesseract),
+and fills the matching input field. For a reCAPTCHA/hCaptcha audio challenge the
+widget lives in a cross-origin iframe that page JS cannot reach, so the audio path
+takes a downloaded file and transcribes it with omarchy-captcha-transcribe.
+
+It NEVER submits a form: it fills the field and reports the guess so you can check
+it (and correct the letters tesseract got wrong) before pressing Enter yourself.
+
+Bindings:
+  config.bind(",cc", "spawn --userscript qute-captcha", mode="normal")
+  config.bind(",ca", "spawn --userscript qute-captcha audio", mode="normal", insertmode=False)
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+from urllib.parse import urljoin
+
+# Bound at import time (qutebrowser sets these in the environment; tests must set
+# os.environ BEFORE exec()-ing this module, or call the functions with the names
+# already bound here).
+QUTE_URL = os.environ.get("QUTE_URL", "")
+QUTE_HTML = os.environ.get("QUTE_HTML", "")
+QUTE_FIFO = os.environ.get("QUTE_FIFO", "/dev/null")
+
+SOLVER = os.environ.get("CAPTCHA_SOLVER", "omarchy-captcha-solve")
+TRANSCRIBER = os.environ.get("CAPTCHA_TRANSCRIBER", "omarchy-captcha-transcribe")
+
+# Substrings that mark an <img> as a captcha (checked against src/alt/id/class/name).
+CAPTCHA_HINTS = ("captcha", "securimage", "verify", "verification", "security-code",
+                 "securitycode", "authcode", "auth-code")
+
+# Input field names/ids we are willing to fill (never a password field).
+FIELD_SELECTOR = ("input[name*='captcha' i],input[id*='captcha' i],"
+                  "input[name*='verify' i],input[id*='verify' i],"
+                  "input[name*='code' i],input[id*='code' i]")
+
+IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
+_FIFO_COMMANDS = []
+
+
+def qute(command):
+    """Send one command to qutebrowser. MUST be a single line - the FIFO reader
+    treats every newline as a new command. Opened in append mode: irrelevant for a
+    real FIFO (QUTE_FIFO), but it lets tests point QUTE_FIFO at a regular file and
+    see every command, and it never truncates on a slow reader."""
+    command = " ".join(str(command).splitlines())
+    try:
+        with open(QUTE_FIFO, "a") as fh:
+            fh.write(command + "\n")
+    except OSError:
+        _FIFO_COMMANDS.append(command)
+
+
+def msg_info(text):
+    qute("message-info '%s'" % _escape(text))
+
+
+def msg_error(text):
+    qute("message-error '%s'" % _escape(text))
+
+
+def _escape(text):
+    return str(text).replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _attr(tag, name):
+    """Value of an attribute NAMED exactly `name`. The leading boundary matters:
+    without it, searching for `src` also matches inside `data-src` (a lazy-loading
+    placeholder), so a lazy image would be handed to tesseract as the captcha."""
+    match = re.search(r"""(?:^|\s)""" + name + r"""\s*=\s*["']([^"']*)["']""", tag, re.I)
+    return match.group(1) if match else ""
+
+
+def find_captcha_image(html, base_url):
+    """Return the absolute URL of the first captcha-looking <img>, or ''."""
+    for tag in IMG_RE.findall(html or ""):
+        haystack = " ".join([_attr(tag, "src"), _attr(tag, "alt"), _attr(tag, "id"),
+                             _attr(tag, "class"), _attr(tag, "name")]).lower()
+        if any(hint in haystack for hint in CAPTCHA_HINTS):
+            src = _attr(tag, "src")
+            if src:
+                # urljoin leaves an absolute URL untouched, adds the scheme to a
+                # protocol-relative one and resolves a path against the page - so the
+                # http(s) check an earlier version made here is redundant.
+                return urljoin(base_url, src)
+    return ""
+
+
+def fill_js(answer):
+    """JS that writes the answer into the captcha field. Single line by contract."""
+    return ("(function(){var t=document.querySelector(\"%s\");"
+            "if(!t){return 'no-field';}"
+            "t.focus();t.value=%s;"
+            "t.dispatchEvent(new Event('input',{bubbles:true}));"
+            "return 'filled';})()" % (FIELD_SELECTOR, json.dumps(answer)))
+
+
+def _run(argv):
+    """Run a helper, returning (ok, stdout). Never raises."""
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=90, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False, ""
+    if proc.returncode == 0:
+        return True, proc.stdout.strip()
+    return False, (proc.stderr or proc.stdout).strip()
+
+
+def cmd_solve():
+    html = ""
+    try:
+        with open(QUTE_HTML) as fh:
+            html = fh.read()
+    except OSError:
+        msg_error("captcha: no page HTML available")
+        return 1
+    image = find_captcha_image(html, QUTE_URL)
+    if not image:
+        msg_info("captcha: no captcha image found on this page")
+        return 0
+    ok, out = _run([SOLVER, image])
+    if not ok:
+        msg_error("captcha: %s" % (out or "could not read the image"))
+        return 1
+    qute("jseval " + fill_js(out))
+    msg_info("captcha guess: %s - check it, then submit yourself" % out)
+    return 0
+
+
+def cmd_audio(arg):
+    if not arg:
+        msg_info("captcha audio: pass a downloaded audio file, e.g. "
+                 ":spawn --userscript qute-captcha audio /tmp/challenge.mp3")
+        return 0
+    ok, out = _run([TRANSCRIBER, arg])
+    if not ok:
+        msg_error("captcha audio: %s" % (out or "transcription failed"))
+        return 1
+    msg_info("captcha audio: %s - type it into the challenge" % out)
+    return 0
+
+
+def cmd_status():
+    solver_ok, _ = _run([SOLVER, "--status"])
+    trans_ok, _ = _run([TRANSCRIBER, "--status"])
+    msg_info("captcha: solver %s, transcriber %s"
+             % ("ok" if solver_ok else "unavailable",
+                "ok" if trans_ok else "unavailable"))
+    return 0
+
+
+COMMANDS = {"solve": cmd_solve, "audio": cmd_audio, "status": cmd_status}
+
+
+def main(argv):
+    mode = argv[0] if argv else "solve"
+    handler = COMMANDS.get(mode)
+    if handler is None:
+        msg_error("captcha: unknown mode '%s' (try: solve, audio, status)" % mode)
+        return 2
+    if mode == "audio":
+        return handler(argv[1] if len(argv) > 1 else "")
+    return handler()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

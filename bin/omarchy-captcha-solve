@@ -1,0 +1,165 @@
+#!/bin/bash
+
+# omarchy:summary=Solve a captcha image locally with tesseract (no API keys)
+# omarchy:group=captcha
+# omarchy:args=[--status|--json] [--lang LANG] <image-path-or-url>
+# omarchy:examples=omarchy-captcha-solve /tmp/captcha.png
+# omarchy:examples=omarchy-captcha-solve --json https://example.com/captcha.jpg
+
+# Reads a text captcha from an image entirely on this machine: fetch (if a URL),
+# preprocess with ImageMagick, OCR with tesseract, then keep the printable
+# alphanumeric run. Never submits anything - it only prints the guess, so the
+# caller (the qute-captcha userscript) can show it for a human to confirm.
+
+set -o pipefail
+
+TESS_LANG="eng"
+OUTPUT_JSON=0
+MODE="solve"
+INPUT=""
+
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+usage() {
+  cat <<'EOF'
+usage: omarchy-captcha-solve [--status] [--json] [--lang LANG] <image-path-or-url>
+
+  --status        report which local tools are available and exit 0
+  --json          emit {"ok":true,"text":"...","source":"..."}
+  --lang LANG     tesseract language (default: eng)
+
+Dependencies: tesseract (required), imagemagick (optional preprocessing),
+curl (only when the argument is a URL).
+EOF
+}
+
+clean() {
+  # keep only ASCII alphanumerics - captcha answers are alphanumeric by design
+  printf '%s' "$1" | tr -cd 'A-Za-z0-9'
+}
+
+ocr() {
+  # $1 = image path, $2 = tesseract page-segmentation mode; prints the cleaned
+  # reading (may be empty). psm 7 (single text line) is right for a captcha;
+  # psm 6 (uniform block) is the fallback for one it splits oddly.
+  local out=""
+  out=$(tesseract "$1" stdout --psm "$2" -l "$TESS_LANG" 2>/dev/null) || out=""
+  clean "$out"
+}
+
+preprocess() {
+  # $1 = input image, $2 = output image; greyscale + a modest upscale helps
+  # tesseract on the small images captchas tend to be. Deliberately NO sharpen:
+  # on a crisp captcha it rings the glyph edges into stray characters. Falls back
+  # to a plain copy when ImageMagick is unavailable or the conversion fails.
+  if have convert; then
+    if convert "$1" -colorspace Gray -resize 200% "$2" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  cp "$1" "$2"
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --status) MODE="status" ;;
+    --json) OUTPUT_JSON=1 ;;
+    --lang) shift; TESS_LANG="${1:-eng}" ;;
+    -h|--help) MODE="help" ;;
+    --) shift; INPUT="$1"; break ;;
+    -*) echo "omarchy-captcha-solve: unknown option: $1" >&2; exit 2 ;;
+    *) INPUT="$1" ;;
+  esac
+  shift
+done
+
+if [[ $MODE == "help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $MODE == "status" ]]; then
+  for tool in tesseract convert curl; do
+    if have "$tool"; then
+      printf '%s: ok\n' "$tool"
+    else
+      printf '%s: missing\n' "$tool"
+    fi
+  done
+  exit 0
+fi
+
+if [[ -z $INPUT ]]; then
+  echo "omarchy-captcha-solve: no image given (try --help)" >&2
+  exit 2
+fi
+
+if [[ $INPUT == http://* || $INPUT == https://* ]]; then
+  if have curl; then
+    [[ -n $INPUT ]] || exit 2
+  else
+    echo "omarchy-captcha-solve: curl is required to fetch a URL" >&2
+    exit 3
+  fi
+else
+  if [[ -f $INPUT ]]; then
+    :
+  else
+    echo "omarchy-captcha-solve: no such image: $INPUT" >&2
+    exit 5
+  fi
+fi
+
+if have tesseract; then
+  :
+else
+  echo "omarchy-captcha-solve: tesseract required - install with: omarchy pkg add tesseract" >&2
+  exit 3
+fi
+
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+
+img="$INPUT"
+if [[ $INPUT == http://* || $INPUT == https://* ]]; then
+  img="$workdir/fetch"
+  if curl -fsSL --max-time 20 -o "$img" "$INPUT"; then
+    :
+  else
+    echo "omarchy-captcha-solve: could not download $INPUT" >&2
+    exit 4
+  fi
+fi
+
+pre="$workdir/pre.png"
+preprocess "$img" "$pre"
+
+best=""
+for candidate in "$(ocr "$pre" 7)" "$(ocr "$img" 7)"; do
+  # captcha answers are short: 3-12 alphanumerics. A longer reading is a row of
+  # stray glyphs from the image border, not an answer - skip it.
+  if (( ${#candidate} < 3 )); then
+    continue
+  fi
+  if (( ${#candidate} > 12 )); then
+    continue
+  fi
+  if (( ${#candidate} > ${#best} )); then
+    best="$candidate"
+  fi
+done
+
+if [[ -n $best ]]; then
+  :
+else
+  echo "omarchy-captcha-solve: no readable text in $INPUT" >&2
+  exit 1
+fi
+
+if (( OUTPUT_JSON )); then
+  printf '{"ok":true,"text":"%s","source":"%s"}\n' "$best" "$INPUT"
+else
+  printf '%s\n' "$best"
+fi

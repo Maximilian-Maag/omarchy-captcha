@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "Maximilian-Maag.captcha",
+  "name": "Captcha solver",
+  "version": "1.0.0",
+  "author": "Maximilian-Maag",
+  "license": "MIT",
+  "description": "Solve captchas locally in qutebrowser \u2014 tesseract OCR for image captchas and a local speech-to-text backend for the reCAPTCHA audio challenge. No API keys, nothing leaves the machine.",
+  "kinds": [
+    "browser-config",
+    "cli"
+  ],
+  "activation": "auto",
+  "entryPoints": {},
+  "omarchy_meta": {
+    "installScript": "install.sh",
+    "features": [
+      "Local image-captcha solving with tesseract (omarchy-captcha-solve), no network or API key",
+      "Local reCAPTCHA audio-challenge transcription (omarchy-captcha-transcribe) via whisper.cpp, vosk or a local endpoint",
+      "qute-captcha userscript: find a captcha on the page, fill the field, show the guess for confirmation",
+      "Never auto-submits - the guess is always shown for a human to check"
+    ],
+    "bindings": [
+      {
+        "keys": ",cc",
+        "description": "Solve the captcha on the current page (local OCR)"
+      },
+      {
+        "keys": ",ca",
+        "description": "Transcribe a downloaded captcha audio challenge"
+      },
+      {
+        "keys": ",cs",
+        "description": "Report which local captcha tools are available"
+      }
+    ]
+  }
+}

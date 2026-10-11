@@ -1,0 +1,244 @@
+#!/bin/bash
+
+# omarchy:summary=Transcribe a captcha audio challenge locally (no API keys)
+# omarchy:group=captcha
+# omarchy:args=[--status|--json] [--backend auto|whisper|vosk|http] <audio-file-or-url>
+# omarchy:examples=omarchy-captcha-transcribe /tmp/challenge.mp3
+
+# Solves the AUDIO variant of a captcha (Google/reCAPTCHA offers one for
+# accessibility) with a LOCAL speech-to-text engine - nothing leaves the machine
+# and no API key is involved. Normalises the audio with ffmpeg, then runs the
+# first available backend:
+#
+#   whisper  - whisper.cpp's `whisper-cli`  (needs a model: CAPTCHA_WHISPER_MODEL)
+#   vosk     - `vosk-transcriber`           (needs a model: CAPTCHA_VOSK_MODEL)
+#   http     - a local OpenAI-compatible endpoint (CAPTCHA_WHISPER_URL)
+#
+# Prints the transcription; the caller shows it so a human can type it in. It
+# never submits anything.
+
+set -o pipefail
+
+MODE="solve"
+OUTPUT_JSON=0
+WANT_BACKEND="auto"
+INPUT=""
+
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+usage() {
+  cat <<'EOF'
+usage: omarchy-captcha-transcribe [--status] [--json] [--backend NAME] <audio-file-or-url>
+
+  --status         report available backends and exit 0
+  --json           emit {"ok":true,"text":"...","backend":"..."}
+  --backend NAME   force a backend: auto (default), whisper, vosk, http
+
+Environment:
+  CAPTCHA_WHISPER_MODEL   path to a whisper.cpp ggml model (for whisper)
+  CAPTCHA_VOSK_MODEL      path to a vosk model directory   (for vosk)
+  CAPTCHA_WHISPER_URL     local OpenAI-compatible /v1/audio/transcriptions URL
+
+Dependencies: ffmpeg (required) plus one backend.
+EOF
+}
+
+clean() {
+  # keep letters, digits and single spaces - captcha audio is a short phrase or
+  # a character sequence; drop punctuation, collapse runs, trim the ends.
+  local s
+  s=$(printf '%s' "$1" | tr -cd 'A-Za-z0-9 ' | tr -s ' ')
+  s="${s#"${s%%[![:space:]]*}"}"
+  s="${s%"${s##*[![:space:]]}"}"
+  printf '%s' "$s"
+}
+
+whisper_model() {
+  local m="${CAPTCHA_WHISPER_MODEL:-}"
+  if [[ -n $m ]]; then
+    printf '%s' "$m"
+    return 0
+  fi
+  for candidate in \
+    /usr/share/whisper.cpp/models/ggml-base.en.bin \
+    /usr/share/whisper-cpp/models/ggml-base.en.bin \
+    "$HOME/.local/share/whisper.cpp/models/ggml-base.en.bin"; do
+    if [[ -f $candidate ]]; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+  done
+  printf ''
+}
+
+detect_backend() {
+  local b=""
+  if have whisper-cli; then
+    b="whisper"
+  fi
+  [[ -z $b ]] && have whisper && b="whisper"
+  [[ -z $b ]] && have vosk-transcriber && b="vosk"
+  [[ -z $b ]] && [[ -n ${CAPTCHA_WHISPER_URL:-} ]] && b="http"
+  [[ -z $b ]] && b="none"
+  printf '%s' "$b"
+}
+
+backend_ready() {
+  # $1 = backend name; true when it can actually run (binary AND model/URL)
+  case "$1" in
+    whisper)
+      have whisper-cli || have whisper || return 1
+      [[ -n $(whisper_model) ]] || return 1
+      return 0 ;;
+    vosk)
+      have vosk-transcriber || return 1
+      [[ -n ${CAPTCHA_VOSK_MODEL:-} ]] || return 1
+      return 0 ;;
+    http)
+      [[ -n ${CAPTCHA_WHISPER_URL:-} ]] || return 1
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+run_whisper() {
+  # $1 = wav path
+  local model=""
+  model=$(whisper_model)
+  [[ -n $model ]] || return 1
+  if have whisper-cli; then
+    whisper-cli -m "$model" -f "$1" -nt -np 2>/dev/null
+    return 0
+  fi
+  [[ -n $model ]] || return 1
+  whisper "$1" --model "$model" --language en --output_format txt --output_dir /dev/null 2>/dev/null
+}
+
+run_vosk() {
+  # $1 = wav path
+  [[ -n ${CAPTCHA_VOSK_MODEL:-} ]] || return 1
+  vosk-transcriber -i "$1" -m "$CAPTCHA_VOSK_MODEL" 2>/dev/null
+}
+
+run_http() {
+  # $1 = wav path
+  [[ -n ${CAPTCHA_WHISPER_URL:-} ]] || return 1
+  have curl || return 1
+  curl -fsS --max-time 60 -F "file=@$1" -F "model=captcha" "$CAPTCHA_WHISPER_URL" 2>/dev/null |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("text",""))' 2>/dev/null
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --status) MODE="status" ;;
+    --json) OUTPUT_JSON=1 ;;
+    --backend) shift; WANT_BACKEND="${1:-auto}" ;;
+    -h|--help) MODE="help" ;;
+    --) shift; INPUT="$1"; break ;;
+    -*) echo "omarchy-captcha-transcribe: unknown option: $1" >&2; exit 2 ;;
+    *) INPUT="$1" ;;
+  esac
+  shift
+done
+
+if [[ $MODE == "help" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ $MODE == "status" ]]; then
+  for backend in whisper vosk http; do
+    if backend_ready "$backend"; then
+      printf '%s: ready\n' "$backend"
+    else
+      printf '%s: unavailable\n' "$backend"
+    fi
+  done
+  if have ffmpeg; then
+    printf 'ffmpeg: ok\n'
+  else
+    printf 'ffmpeg: missing\n'
+  fi
+  exit 0
+fi
+
+if [[ -z $INPUT ]]; then
+  echo "omarchy-captcha-transcribe: no audio given (try --help)" >&2
+  exit 2
+fi
+
+if have ffmpeg; then
+  :
+else
+  echo "omarchy-captcha-transcribe: ffmpeg required - install with: omarchy pkg add ffmpeg" >&2
+  exit 3
+fi
+
+backend="$WANT_BACKEND"
+if [[ $backend == "auto" ]]; then
+  backend=$(detect_backend)
+fi
+
+if backend_ready "$backend"; then
+  :
+else
+  echo "omarchy-captcha-transcribe: no usable backend for '$backend'." >&2
+  echo "  whisper: omarchy pkg add whisper-cpp  + set CAPTCHA_WHISPER_MODEL" >&2
+  echo "  vosk:    omarchy pkg add vosk-api     + set CAPTCHA_VOSK_MODEL" >&2
+  echo "  http:    set CAPTCHA_WHISPER_URL to a local transcription endpoint" >&2
+  exit 3
+fi
+
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+
+src="$INPUT"
+if [[ $INPUT == http://* || $INPUT == https://* ]]; then
+  have curl || { echo "omarchy-captcha-transcribe: curl required to fetch a URL" >&2; exit 3; }
+  src="$workdir/fetch"
+  if curl -fsSL --max-time 30 -o "$src" "$INPUT"; then
+    :
+  else
+    echo "omarchy-captcha-transcribe: could not download $INPUT" >&2
+    exit 4
+  fi
+fi
+
+if [[ -f $src ]]; then
+  :
+else
+  echo "omarchy-captcha-transcribe: no such audio file: $src" >&2
+  exit 5
+fi
+
+wav="$workdir/challenge.wav"
+if ffmpeg -loglevel error -i "$src" -ar 16000 -ac 1 -f wav -y "$wav" >/dev/null 2>&1; then
+  :
+else
+  echo "omarchy-captcha-transcribe: could not decode $src with ffmpeg" >&2
+  exit 4
+fi
+
+text=""
+case "$backend" in
+  whisper) text=$(run_whisper "$wav") ;;
+  vosk) text=$(run_vosk "$wav") ;;
+  http) text=$(run_http "$wav") ;;
+esac
+text=$(clean "$text")
+
+if [[ -n $text ]]; then
+  :
+else
+  echo "omarchy-captcha-transcribe: backend '$backend' produced no text" >&2
+  exit 1
+fi
+
+if (( OUTPUT_JSON )); then
+  printf '{"ok":true,"text":"%s","backend":"%s"}\n' "$text" "$backend"
+else
+  printf '%s\n' "$text"
+fi

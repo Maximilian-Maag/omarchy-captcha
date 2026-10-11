@@ -1,0 +1,25 @@
+name: tests
+
+# Policy as code runs here too, but as part of the full suite: every test kind the
+# plugin promises (unit, regression, integration, js, shell) plus mutation testing.
+on:
+  push:
+  pull_request:
+
+jobs:
+  suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the policy check diffs against the base branch
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: All test kinds (policy, unit, regression, integration, js, shell, mutation)
+        run: bash tools/run_tests.sh
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
