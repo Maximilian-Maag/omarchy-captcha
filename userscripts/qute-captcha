@@ -40,6 +40,11 @@ FIELD_SELECTOR = ("input[name*='captcha' i],input[id*='captcha' i],"
                   "input[name*='code' i],input[id*='code' i]")
 
 IMG_RE = re.compile(r"<img\b[^>]*>", re.I)
+AUDIO_TAG_RE = re.compile(r"<(?:audio|source)\b[^>]*>", re.I)
+ANCHOR_RE = re.compile(r"<a\b[^>]*>", re.I)
+
+# Extensions that mark a URL as an audio file the transcriber can fetch.
+AUDIO_EXT = (".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".opus")
 _FIFO_COMMANDS = []
 
 
@@ -91,6 +96,48 @@ def find_captcha_image(html, base_url):
     return ""
 
 
+def is_audio_url(url):
+    """True when `url`'s PATH ends in an audio extension (a ?query or #fragment may follow)."""
+    path = (url or "").split("#", 1)[0].split("?", 1)[0].lower()
+    return any(path.endswith(ext) for ext in AUDIO_EXT)
+
+
+def _fetchable(url):
+    """False for blob:/data: sources: those are not URLs the transcriber can fetch, so handing
+    them on would only produce a confusing backend error."""
+    return not (url or "").strip().lower().startswith(("blob:", "data:"))
+
+
+def find_captcha_audio(html, base_url):
+    """Absolute URL of an audio captcha on the page, or ''.
+
+    Two shapes, in order: an <audio>/<source> pointing at an audio file, then an <a href> that
+    points straight at one (some challenges hand out a download link, so a bare link is only
+    taken when it also carries a captcha/audio hint). A blob:/data: source is skipped - the audio
+    has no fetchable URL - rather than passed on to fail downstream.
+    """
+    for tag in AUDIO_TAG_RE.findall(html or ""):
+        src = _attr(tag, "src")
+        if src and is_audio_url(src) and _fetchable(src):
+            return urljoin(base_url, src)
+    for tag in ANCHOR_RE.findall(html or ""):
+        href = _attr(tag, "href")
+        if not (href and is_audio_url(href) and _fetchable(href)):
+            continue
+        haystack = " ".join([href, _attr(tag, "id"), _attr(tag, "class")]).lower()
+        if any(hint in haystack for hint in CAPTCHA_HINTS) or "audio" in haystack:
+            return urljoin(base_url, href)
+    return ""
+
+
+def _page_html():
+    try:
+        with open(QUTE_HTML) as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
 def fill_js(answer):
     """JS that writes the answer into the captcha field. Single line by contract."""
     return ("(function(){var t=document.querySelector(\"%s\");"
@@ -134,8 +181,16 @@ def cmd_solve():
 
 def cmd_audio(arg):
     if not arg:
-        msg_info("captcha audio: pass a downloaded audio file, e.g. "
-                 ":spawn --userscript qute-captcha audio /tmp/challenge.mp3")
+        # No file given: try to find the challenge ourselves - the current URL if it IS audio,
+        # else an audio captcha on the page. That removes the manual copy step for an inline
+        # challenge. (A reCAPTCHA/hCaptcha widget lives in a cross-origin IFRAME the page HTML
+        # does not contain; its audio still has to be handed over - see the guidance below.)
+        arg = QUTE_URL if is_audio_url(QUTE_URL) else find_captcha_audio(_page_html(), QUTE_URL)
+    if not arg:
+        msg_info("captcha audio: nothing to transcribe - pass a downloaded audio file, e.g. "
+                 ":spawn --userscript qute-captcha audio /tmp/challenge.mp3 (for an "
+                 "hCaptcha/reCAPTCHA widget's audio challenge, copy its .mp3 from "
+                 ":devtools > Network)")
         return 0
     ok, out = _run([TRANSCRIBER, arg])
     if not ok:

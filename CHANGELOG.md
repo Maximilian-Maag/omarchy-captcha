@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0
+
+- `,ca` (the userscript's audio mode) now FINDS the challenge when no file is given, instead of
+  only printing guidance: the current URL when it is itself an audio file, else an
+  `<audio>`/`<source>` on the page, else a captcha/audio-hinted `<a href>`. A `blob:`/`data:`
+  source is skipped rather than passed to the transcriber to fail on. That removes the manual
+  copy step for an inline audio challenge. A reCAPTCHA/hCaptcha widget still lives in a
+  cross-origin iframe the page HTML does not contain, so its audio must be handed over
+  (`:devtools` > Network -> the `.mp3`); the guidance now says exactly that.
+- The transcribe shell test now runs the CLI on a HERMETIC PATH (`$STUBS:$CORE`) rather than
+  `$STUBS:$PATH`. Appending the real PATH let a genuinely installed backend leak in: once
+  whisper-cli existed on this machine, the "whisper unavailable" and "no backend" assertions
+  stopped holding and auto-selection picked the real binary over the stub. A test whose result
+  depends on what happens to be installed is not a test.
+
 ## 1.0.0
 
 - `omarchy-captcha-solve`: local image-captcha OCR (tesseract) with optional ImageMagick

@@ -50,6 +50,21 @@ omarchy pkg add vosk-api         # then set CAPTCHA_VOSK_MODEL to a model direct
 
 `omarchy-captcha-transcribe --status` reports which backends are ready.
 
+No root for whisper.cpp: it builds into `~/.local` in a few minutes and is found on PATH there,
+and the transcriber also looks for a model at `~/.local/share/whisper.cpp/models/ggml-base.en.bin`
+- so a ggml model you already have (e.g. from voxtype) can simply be symlinked in, with no
+`CAPTCHA_WHISPER_MODEL` to set:
+
+```bash
+git clone --depth=1 https://github.com/ggml-org/whisper.cpp ~/.local/share/whisper.cpp-src
+cmake -B ~/.local/share/whisper.cpp-src/build -S ~/.local/share/whisper.cpp-src \
+      -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_TESTS=OFF
+cmake --build ~/.local/share/whisper.cpp-src/build -j"$(nproc)"
+ln -sf ~/.local/share/whisper.cpp-src/build/bin/whisper-cli ~/.local/bin/whisper-cli
+mkdir -p ~/.local/share/whisper.cpp/models
+ln -sf ~/.local/share/voxtype/models/ggml-base.en.bin ~/.local/share/whisper.cpp/models/
+```
+
 ## Usage
 
 In qutebrowser:

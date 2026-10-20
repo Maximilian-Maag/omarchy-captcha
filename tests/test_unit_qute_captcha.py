@@ -168,6 +168,84 @@ class Audio(Base):
         self.assertTrue(any("message-error" in c for c in self.sent()))
 
 
+class AudioAutoDetect(Base):
+    """`,ca` with no argument should find the challenge itself when it can."""
+
+    def load_with_html(self, html, **over):
+        pathlib.Path(self.html).write_text(html)
+        return self.load(**over)
+
+    def test_finds_an_audio_element(self):
+        g = self.load()
+        html = '<audio src="/challenge/captcha.mp3"></audio>'
+        self.assertEqual(g["find_captcha_audio"](html, "https://example.com/login"),
+                         "https://example.com/challenge/captcha.mp3")
+
+    def test_finds_a_source_child(self):
+        g = self.load()
+        html = '<audio><source src="/a/audio-1.ogg" type="audio/ogg"></audio>'
+        self.assertEqual(g["find_captcha_audio"](html, "https://example.com/"),
+                         "https://example.com/a/audio-1.ogg")
+
+    def test_skips_a_blob_source_and_uses_the_next(self):
+        # a blob: src is not a URL the transcriber can fetch -> skip it, do not fail on it
+        g = self.load()
+        html = ('<audio src="blob:https://example.com/zzz"></audio>'
+                '<audio src="/captcha/challenge.mp3"></audio>')
+        self.assertEqual(g["find_captcha_audio"](html, "https://example.com/"),
+                         "https://example.com/captcha/challenge.mp3")
+
+    def test_skips_a_data_source(self):
+        g = self.load()
+        self.assertEqual(g["find_captcha_audio"](
+            '<audio src="data:audio/mp3;base64,AAAA"></audio>', "https://example.com/"), "")
+
+    def test_finds_a_link_that_carries_a_captcha_hint(self):
+        g = self.load()
+        html = '<a id="captcha" href="/dl/9ab.mp3">download</a>'
+        self.assertEqual(g["find_captcha_audio"](html, "https://example.com/"),
+                         "https://example.com/dl/9ab.mp3")
+
+    def test_finds_a_link_that_says_audio_without_a_captcha_hint(self):
+        g = self.load()
+        html = '<a id="audio-dl" href="/dl/9ab.mp3">download</a>'
+        self.assertEqual(g["find_captcha_audio"](html, "https://example.com/"),
+                         "https://example.com/dl/9ab.mp3")
+
+    def test_ignores_a_plain_music_link(self):
+        g = self.load()
+        self.assertEqual(g["find_captcha_audio"]('<a href="/song.mp3">music</a>',
+                                                 "https://example.com/"), "")
+
+    def test_no_audio_is_empty(self):
+        g = self.load()
+        self.assertEqual(g["find_captcha_audio"]("<html>nothing</html>", "https://example.com/"), "")
+
+    def test_empty_html_is_safe(self):
+        g = self.load()
+        self.assertEqual(g["find_captcha_audio"]("", "https://example.com/"), "")
+
+    def test_is_audio_url(self):
+        g = self.load()
+        self.assertTrue(g["is_audio_url"]("https://x/a/captcha.mp3"))
+        self.assertTrue(g["is_audio_url"]("/a/captcha.mp3?r=1"))
+        self.assertTrue(g["is_audio_url"]("/a/cap.wav#t"))
+        self.assertFalse(g["is_audio_url"]("/a/captcha.png"))
+        self.assertFalse(g["is_audio_url"](""))
+        self.assertFalse(g["is_audio_url"]("/a/mp3"))
+
+    def test_cmd_audio_uses_the_page_audio(self):
+        g = self.load_with_html('<audio src="/captcha/challenge.mp3"></audio>')
+        self.assertEqual(g["cmd_audio"](""), 0)
+        self.assertTrue(any("cd 34" in c for c in self.sent()), self.sent())
+
+    def test_cmd_audio_uses_the_current_url_when_it_is_audio(self):
+        pathlib.Path(self.html).write_text("<html></html>")
+        g = self.load(QUTE_URL="https://example.com/captcha/challenge.mp3")
+        self.assertEqual(g["cmd_audio"](""), 0)
+        self.assertTrue(any("cd 34" in c for c in self.sent()), self.sent())
+
+
 class Status(Base):
     def test_reports_both_tools(self):
         g = self.load()
