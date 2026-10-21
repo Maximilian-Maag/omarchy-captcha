@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1
+
+### Fixed
+- **A captcha rendered as an inline `data:` image is now solved.** Found by a live browser test on
+  BotDetect's demo: the challenge `<img>` src was `data:image/jpeg;base64,...`, and the userscript
+  handed that whole blob to `omarchy-captcha-solve`, which answered "no such image" (a `data:` URL
+  is neither a file nor an http URL). `cmd_solve` now decodes a `data:` image to a temp file, solves
+  that, and removes it. Decoding is also the *correct* route for a session-bound captcha: the bytes
+  are already in the page, so no cookie is needed to fetch the same image the user is looking at.
+
 ## 1.1.0
 
 - `,ca` (the userscript's audio mode) now FINDS the challenge when no file is given, instead of

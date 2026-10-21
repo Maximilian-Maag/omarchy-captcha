@@ -66,12 +66,12 @@
       ],
       "equivalent": [
         {
-          "line": 106,
+          "line": 185,
           "kind": "number\u00b11",
           "reason": "the subprocess timeout of 90s in _run; every helper the tests invoke is a stub that returns immediately, so 91 vs 90 is unobservable. Proven: mutant applied, unit-test output identical to the baseline (after normalising unittest's elapsed-time line)."
         },
         {
-          "line": 101,
+          "line": 103,
           "kind": "number\u00b11",
           "reason": "path = (url or '').split('#', 1)[0].split('?', 1)[0] takes index 0 of each split, so the maxsplit value cannot change the result: with maxsplit 2 the element at index 0 is the same substring before the first '#'. Both splits are affected and both are equivalent."
         }

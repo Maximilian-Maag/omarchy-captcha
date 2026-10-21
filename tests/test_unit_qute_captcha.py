@@ -6,6 +6,7 @@ sets the environment BEFORE exec()-ing it (patching globals afterwards is a no-o
 module-level names). The helper CLIs are stubbed with tiny scripts so no real OCR / STT
 runs here - the real tools are exercised by the integration and e2e kinds.
 """
+import base64
 import json
 import os
 import pathlib
@@ -108,6 +109,59 @@ class Detection(Base):
     def test_empty_html_is_safe(self):
         g = self.load()
         self.assertEqual(g["find_captcha_image"]("", "https://example.com/"), "")
+
+
+DATA_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+
+class DataUrlImages(Base):
+    """A captcha rendered as an inline data: URL (BotDetect's demo does this). The bytes are in
+    the page, so the solver must be handed a real file - passing the raw data: URL failed with
+    "No such image", which is what a live browser test caught."""
+
+    def test_image_to_file_leaves_a_url_alone(self):
+        g = self.load()
+        self.assertEqual(g["image_to_file"]("https://example.com/c.png"),
+                         "https://example.com/c.png")
+
+    def test_image_to_file_decodes_a_data_url(self):
+        g = self.load()
+        path = g["image_to_file"](DATA_PNG)
+        try:
+            self.assertNotEqual(path, DATA_PNG)
+            self.assertTrue(path.endswith(".png"), path)
+            with open(path, "rb") as fh:
+                self.assertEqual(fh.read(), base64.b64decode(DATA_PNG.split(",", 1)[1]))
+        finally:
+            os.unlink(path)
+
+    def test_cmd_solve_hands_the_solver_the_decoded_bytes(self):
+        pathlib.Path(self.html).write_text('<img alt="captcha" src="' + DATA_PNG + '">')
+        # the stub reports the SIZE of the file it was given, so the assertion is about the
+        # decoded bytes, never the base64 text
+        stub = make_stub(self.tmp, "sizesolver", 'printf "size=%s" "$(wc -c < "$1")"')
+        g = self.load(CAPTCHA_SOLVER=stub)
+        self.assertEqual(g["cmd_solve"](), 0)
+        want = len(base64.b64decode(DATA_PNG.split(",", 1)[1]))
+        self.assertTrue(any(("captcha guess: size=%d" % want) in c for c in self.sent()),
+                        self.sent())
+
+    def test_cmd_solve_removes_its_temp_file(self):
+        pathlib.Path(self.html).write_text('<img alt="captcha" src="' + DATA_PNG + '">')
+        stub = make_stub(self.tmp, "pathsolver", 'printf "p=%s" "$1"')
+        g = self.load(CAPTCHA_SOLVER=stub)
+        self.assertEqual(g["cmd_solve"](), 0)
+        line = [c for c in self.sent() if "captcha guess: p=" in c][0]
+        made = line.split("captcha guess: p=", 1)[1].split(" ", 1)[0].strip("'")
+        self.assertFalse(os.path.exists(made), "the temp image must be cleaned up: %s" % made)
+
+    def test_a_normal_image_url_reaches_the_solver_unchanged(self):
+        pathlib.Path(self.html).write_text('<img alt="captcha" src="/captcha.png?r=1">')
+        stub = make_stub(self.tmp, "urlsolver", 'printf "u=%s" "$1"')
+        g = self.load(CAPTCHA_SOLVER=stub)
+        self.assertEqual(g["cmd_solve"](), 0)
+        self.assertTrue(any("u=https://example.com/captcha.png?r=1" in c for c in self.sent()),
+                        self.sent())
 
 
 class FillJs(Base):

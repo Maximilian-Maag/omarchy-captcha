@@ -13,11 +13,13 @@ Bindings:
   config.bind(",cc", "spawn --userscript qute-captcha", mode="normal")
   config.bind(",ca", "spawn --userscript qute-captcha audio", mode="normal", insertmode=False)
 """
+import base64
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from urllib.parse import urljoin
 
 # Bound at import time (qutebrowser sets these in the environment; tests must set
@@ -108,6 +110,36 @@ def _fetchable(url):
     return not (url or "").strip().lower().startswith(("blob:", "data:"))
 
 
+# An inline image: the bytes are IN the page as base64, so there is nothing to fetch and no
+# session cookie involved. Some captcha widgets render the challenge this way; a solver handed the
+# raw data: URL fails with "No such image".
+DATA_URL_RE = re.compile(r"^data:image/([a-z0-9.+-]+);base64,(.*)$", re.I | re.S)
+
+
+def image_to_file(url):
+    """A path the solver can read, or `url` unchanged when it is not a data: URL.
+
+    A data: URL is decoded to a temp file. That is not just convenience: the image is embedded in
+    the page, so decoding it sidesteps the fact that fetching a session-bound captcha URL without
+    the browser's cookies can return a different image than the one on screen.
+    """
+    match = DATA_URL_RE.match(url or "")
+    if not match:
+        return url
+    subtype = match.group(1).lower().replace("jpeg", "jpg")
+    handle, path = tempfile.mkstemp(prefix="qute-captcha-", suffix="." + subtype)
+    try:
+        with os.fdopen(handle, "wb") as fh:
+            fh.write(base64.b64decode(match.group(2)))
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise
+    return path
+
+
 def find_captcha_audio(html, base_url):
     """Absolute URL of an audio captcha on the page, or ''.
 
@@ -170,7 +202,15 @@ def cmd_solve():
     if not image:
         msg_info("captcha: no captcha image found on this page")
         return 0
-    ok, out = _run([SOLVER, image])
+    path = image_to_file(image)
+    try:
+        ok, out = _run([SOLVER, path])
+    finally:
+        if path != image:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
     if not ok:
         msg_error("captcha: %s" % (out or "could not read the image"))
         return 1
