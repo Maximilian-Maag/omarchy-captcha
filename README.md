@@ -71,9 +71,17 @@ In qutebrowser:
 
 | Keys | Action |
 |---|---|
-| `,cc` | Solve the captcha on the current page and fill the field |
-| `,ca` | Transcribe a downloaded audio challenge |
-| `,cs` | Report which local tools are available |
+| `,vc` | Solve the captcha on the current page and fill the field |
+| `,va` | Transcribe a downloaded audio challenge |
+| `,vs` | Report which local tools are available |
+
+The shortcuts sit under `,v` on purpose. qutebrowser has **no timeout on a partial match**: if one
+binding is a prefix of another, the shorter one stops firing immediately and the next keypress is
+swallowed — silently, with nothing in the log. So `,c` at the front would have been wrong the moment
+the platform's `,c` (reader-factcheck) existed. `,v` is bound to nothing on its own, which is the
+same rule the platform follows for `,ab`, `,dt`, `,ka`, `,zr`. `install.sh` runs
+`tools/check_bindings.py` against your config and refuses to write the fragment if anything
+collides (duplicate key or prefix).
 
 From a shell:
 
@@ -90,7 +98,7 @@ omarchy-captcha-transcribe --status
 
 - **reCAPTCHA / hCaptcha widgets live in a cross-origin iframe** that page JavaScript cannot
   reach, so the image path cannot drive them. Use the widget's audio option, download the
-  audio, and run `,ca`. The userscript says so rather than pretending.
+  audio, and run `,va`. The userscript says so rather than pretending.
 - **The guess is shown, never submitted.** OCR is not perfect; treat the reading as a
   suggestion. That is deliberate — silently submitting a wrong answer is worse than showing it.
 - Tesseract is configured for `eng` by default; pass `--lang` for another language.

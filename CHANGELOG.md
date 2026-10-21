@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.2
+
+### Fixed
+- **The shortcuts no longer collide with the rest of the `,` namespace.** They were `,cc` / `,ca` /
+  `,cs`, and the platform binds `,c` to `reader-factcheck`. qutebrowser has NO timeout on a partial
+  match, so because `,c` is a prefix of `,cc`, `,c` stopped firing and the next keypress was
+  swallowed - silently, with nothing in the log. They are now `,vc` / `,va` / `,vs`, under `,v`,
+  which nothing binds on its own. Same rule the platform already follows: a 2-letter binding hangs
+  off a first key that has no binding of its own (`,ab`, `,dt`, `,ka`, `,zr`).
+- **A collision check runs at install time.** `tools/check_bindings.py` parses the fragment plus the
+  config it is being added to and refuses duplicate keys and prefix collisions; `install.sh` stages
+  the fragment, runs the check, and only writes it when clean. Covered by
+  `tests/test_unit_check_bindings.py` - 7 tests, including the exact `,c` / `,cc` regression.
+
 ## 1.1.1
 
 ### Fixed

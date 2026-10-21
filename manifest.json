@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "Maximilian-Maag.captcha",
   "name": "Captcha solver",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "author": "Maximilian-Maag",
   "license": "MIT",
   "description": "Solve captchas locally in qutebrowser \u2014 tesseract OCR for image captchas and a local speech-to-text backend for the reCAPTCHA audio challenge. No API keys, nothing leaves the machine.",
@@ -22,15 +22,15 @@
     ],
     "bindings": [
       {
-        "keys": ",cc",
+        "keys": ",vc",
         "description": "Solve the captcha on the current page (local OCR)"
       },
       {
-        "keys": ",ca",
+        "keys": ",va",
         "description": "Transcribe a downloaded captcha audio challenge"
       },
       {
-        "keys": ",cs",
+        "keys": ",vs",
         "description": "Report which local captcha tools are available"
       }
     ]

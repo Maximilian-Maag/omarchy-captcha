@@ -223,7 +223,7 @@ class Audio(Base):
 
 
 class AudioAutoDetect(Base):
-    """`,ca` with no argument should find the challenge itself when it can."""
+    """`,va` with no argument should find the challenge itself when it can."""
 
     def load_with_html(self, html, **over):
         pathlib.Path(self.html).write_text(html)
