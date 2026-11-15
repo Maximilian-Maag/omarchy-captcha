@@ -4,6 +4,7 @@ generated inputs, and the real HTTP fetch path against a loopback server. Only t
 speech backend is stubbed, because no STT engine is installed on the test host - the
 backend selection itself is still exercised for real.
 """
+import json
 import os
 import pathlib
 import shutil
@@ -54,6 +55,19 @@ class SolveRealOcr(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn('"text":"9137"', out)
         self.assertIn('"ok":true', out)
+
+    def test_json_escapes_a_quote_and_backslash_in_the_source(self):
+        # The source field is the caller's path verbatim. A hand-printed JSON string spliced it
+        # in raw, so a path holding a quote or backslash produced a document json.load rejects.
+        # Both hostile characters at once pin the escaping.
+        weird = self.tmp / 'cap"tcha\\x.png'
+        make_image(weird, "4821")
+        rc, out, err = run([str(SOLVE), "--json", str(weird)])
+        self.assertEqual(rc, 0, err)
+        parsed = json.loads(out)              # must not raise
+        self.assertEqual(parsed["ok"], True)
+        self.assertEqual(parsed["text"], "4821")
+        self.assertEqual(parsed["source"], str(weird))
 
     def test_status_is_non_mutating(self):
         rc, out, _ = run([str(SOLVE), "--status"])

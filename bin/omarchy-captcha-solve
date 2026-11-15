@@ -159,7 +159,12 @@ else
 fi
 
 if (( OUTPUT_JSON )); then
-  printf '{"ok":true,"text":"%s","source":"%s"}\n' "$best" "$INPUT"
+  # The source is the caller's path/URL verbatim, which may hold a quote or backslash; a bare
+  # printf would splice it straight into the JSON string and emit something unparseable. Pass
+  # the values through the environment so no shell quoting is involved, and let json.dumps do
+  # the escaping. separators=(",",":") keeps the compact shape callers already parse.
+  BEST="$best" SOURCE="$INPUT" python3 -c \
+    'import json, os; print(json.dumps({"ok": True, "text": os.environ["BEST"], "source": os.environ["SOURCE"]}, separators=(",", ":")))'
 else
   printf '%s\n' "$best"
 fi
