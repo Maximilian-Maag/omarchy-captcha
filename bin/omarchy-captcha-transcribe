@@ -74,15 +74,17 @@ whisper_model() {
 }
 
 detect_backend() {
-  local b=""
-  if have whisper-cli; then
-    b="whisper"
-  fi
-  [[ -z $b ]] && have whisper && b="whisper"
-  [[ -z $b ]] && have vosk-transcriber && b="vosk"
-  [[ -z $b ]] && [[ -n ${CAPTCHA_WHISPER_URL:-} ]] && b="http"
-  [[ -z $b ]] && b="none"
-  printf '%s' "$b"
+  # Auto mode: the first backend that is READY (binary AND model/URL), not merely
+  # present. A binary whose model is missing cannot run, so choosing it on presence
+  # alone would hard-fail even when a later backend is fully usable.
+  local b
+  for b in whisper vosk http; do
+    if backend_ready "$b"; then
+      printf '%s' "$b"
+      return 0
+    fi
+  done
+  printf 'none'
 }
 
 backend_ready() {

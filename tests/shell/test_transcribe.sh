@@ -117,6 +117,15 @@ out=$(HOME="$CORE" PATH="$STUBS:$CORE" CAPTCHA_VOSK_MODEL="$STUBS/vosk-model" "$
 check "auto picks vosk" "vk 7" "$out"
 rm -f "$STUBS/vosk-transcriber"
 
+# whisper binary present but NO model, vosk ready -> auto must fall through to vosk.
+# Selecting whisper on binary presence alone hard-failed (exit 3) here even though vosk
+# could run; auto mode has to respect backend_ready (model/URL), not just presence.
+printf '#!/bin/bash\necho "WRONG-BACKEND"\n' > "$STUBS/whisper-cli"; chmod +x "$STUBS/whisper-cli"
+printf '#!/bin/bash\necho "vk 7"\n' > "$STUBS/vosk-transcriber"; chmod +x "$STUBS/vosk-transcriber"
+out=$(HOME="$CORE" PATH="$STUBS:$CORE" CAPTCHA_VOSK_MODEL="$STUBS/vosk-model" "$TRANS" "$audio")
+check "auto skips a modelless whisper for a ready vosk" "vk 7" "$out"
+rm -f "$STUBS/whisper-cli" "$STUBS/vosk-transcriber"
+
 # Only a local http endpoint -> http
 printf '#!/bin/bash\necho "{\\"text\\":\\"zz9\\"}"\n' > "$STUBS/curl"; chmod +x "$STUBS/curl"
 out=$(HOME="$CORE" PATH="$STUBS:$CORE" CAPTCHA_WHISPER_URL="http://127.0.0.1:9/v1/audio/transcriptions" "$TRANS" "$audio")
