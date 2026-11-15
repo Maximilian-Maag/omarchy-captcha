@@ -7,6 +7,8 @@ module-level names). The helper CLIs are stubbed with tiny scripts so no real OC
 runs here - the real tools are exercised by the integration and e2e kinds.
 """
 import base64
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -346,6 +348,26 @@ class Escaping(Base):
     def test_escape_protects_the_fifo_command(self):
         g = self.load()
         self.assertEqual(g["_escape"]("it's"), "it\\'s")
+
+
+class FifoFailure(Base):
+    """A FIFO write that fails means the command never reached qutebrowser. The old code
+    appended it to a _FIFO_COMMANDS buffer that nothing read, so the failure was invisible;
+    it must now be surfaced on stderr instead."""
+
+    def test_failed_fifo_write_is_reported_on_stderr(self):
+        # a QUTE_FIFO under a missing directory cannot be opened -> the write fails
+        g = self.load(QUTE_FIFO=os.path.join(self.tmp, "missing-dir", "fifo"))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            g["qute"]("message-info 'hi'")
+        self.assertIn("QUTE_FIFO", err.getvalue())
+        self.assertIn("message-info", err.getvalue())
+
+    def test_no_dead_buffer_is_kept(self):
+        # the buffer is gone, not merely unread: a silent stash would still hide the failure
+        g = self.load()
+        self.assertNotIn("_FIFO_COMMANDS", g)
 
 
 if __name__ == "__main__":

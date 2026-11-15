@@ -48,7 +48,6 @@ ANCHOR_RE = re.compile(r"<a\b[^>]*>", re.I)
 
 # Extensions that mark a URL as an audio file the transcriber can fetch.
 AUDIO_EXT = (".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".opus")
-_FIFO_COMMANDS = []
 
 
 def qute(command):
@@ -60,8 +59,12 @@ def qute(command):
     try:
         with open(QUTE_FIFO, "a") as fh:
             fh.write(command + "\n")
-    except OSError:
-        _FIFO_COMMANDS.append(command)
+    except OSError as err:
+        # A failed write means the command never reached qutebrowser. Surface it on
+        # stderr: the earlier code stashed it in a _FIFO_COMMANDS buffer that nothing
+        # ever read, so a dead FIFO looked indistinguishable from a delivered command.
+        print("qute-captcha: could not send to QUTE_FIFO (%s): %s -- dropping: %s"
+              % (QUTE_FIFO, err, command), file=sys.stderr)
 
 
 def msg_info(text):
