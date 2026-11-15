@@ -79,5 +79,20 @@ class CheckBindings(unittest.TestCase):
         self.assertIn("prefix", err.getvalue())
 
 
+class ShippedUserscript(unittest.TestCase):
+    """The userscript's docstring lists config.bind() lines, and check_bindings parses those
+    too - so they must document the bindings the repo actually ships (",vc"/",va"/",vs") and
+    must not themselves collide. An earlier docstring still listed the retired ,cc/,ca."""
+
+    USCRIPT = pathlib.Path(__file__).resolve().parent.parent / "userscripts" / "qute-captcha"
+
+    def test_documented_bindings_are_the_shipped_ones(self):
+        keys = sorted(k for _mode, k, _path, _line in cb.parse(str(self.USCRIPT)))
+        self.assertEqual(keys, [",va", ",vc", ",vs"])
+
+    def test_documented_bindings_do_not_collide(self):
+        self.assertEqual(cb.collisions(cb.parse(str(self.USCRIPT))), [])
+
+
 if __name__ == "__main__":
     unittest.main()

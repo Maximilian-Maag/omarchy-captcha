@@ -9,9 +9,10 @@ takes a downloaded file and transcribes it with omarchy-captcha-transcribe.
 It NEVER submits a form: it fills the field and reports the guess so you can check
 it (and correct the letters tesseract got wrong) before pressing Enter yourself.
 
-Bindings:
-  config.bind(",cc", "spawn --userscript qute-captcha", mode="normal")
-  config.bind(",ca", "spawn --userscript qute-captcha audio", mode="normal", insertmode=False)
+Bindings (installed by install.sh as a fragment under the free ",v" prefix):
+  config.bind(",vc", "spawn --userscript qute-captcha", mode="normal")
+  config.bind(",va", "spawn --userscript qute-captcha audio", mode="normal")
+  config.bind(",vs", "spawn --userscript qute-captcha status", mode="normal")
 """
 import base64
 import json
